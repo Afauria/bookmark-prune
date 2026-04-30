@@ -1,0 +1,12 @@
+karakeep
+node_modules/
+dist/
+data/
+.env
+*.db
+.omc
+graphify-out/
+priv/
+config/settings.yaml
+config/config.yaml
+.claude

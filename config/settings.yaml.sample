@@ -1,0 +1,29 @@
+ai:
+  provider: anthropic  # anthropic | openai | ollama | gemini
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    base_url: https://api.anthropic.com
+    model: claude-sonnet-4-6
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    base_url: https://api.openai.com/v1
+    model: gpt-4o
+  ollama:
+    base_url: http://localhost:11434
+    model: llama3
+  gemini:
+    api_key: ${GEMINI_API_KEY}
+    model: gemini-2.5-pro
+  batch:
+    size: 20
+    concurrency: 3
+    retry: 3
+    delay_seconds: 1
+
+storage:
+  db: ./data/bookmarks.db
+  cache: ./data/cache/
+
+thresholds:
+  low_confidence: 0.7
+  dead_link_timeout: 10

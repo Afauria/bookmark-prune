@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bookmark Prune</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="header">
+  <h1>Bookmark Prune</h1>
+  <div class="stats-bar" id="statsBar">加载中...</div>
+</div>
+<div class="toolbar">
+  <div class="dd-wrap" id="ddCat">
+    <input class="dd-input" placeholder="分类" readonly>
+    <div class="dd-list"><div class="dd-opt none" data-value="">全部</div></div>
+  </div>
+  <div class="dd-wrap" id="ddTag">
+    <input class="dd-input" placeholder="标签" readonly>
+    <div class="dd-list"><div class="dd-opt none" data-value="">全部</div></div>
+  </div>
+  <div class="dd-wrap" id="ddStatus">
+    <input class="dd-input" placeholder="状态" readonly>
+    <div class="dd-list">
+      <div class="dd-opt none" data-value="">全部</div>
+      <div class="dd-opt" data-value="pending">未扫描</div>
+      <div class="dd-opt" data-value="scan_done">快速扫描</div>
+      <div class="dd-opt" data-value="deep_done">深度扫描</div>
+      <div class="dd-opt" data-value="error">失败</div>
+      <div class="dd-opt" data-value="dead">无法访问</div>
+      <div class="dd-opt" data-value="empty">内容为空</div>
+    </div>
+  </div>
+  <input class="search-input" id="searchInput" placeholder="搜索标题或 URL...">
+  <div class="sep"></div>
+  <button class="action-btn scan-btn" id="btnScan" disabled title="快速扫描选中书签">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    快速扫描
+  </button>
+  <button class="action-btn deep-btn" id="btnDeep" disabled title="深度解析选中书签">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+    深度解析
+  </button>
+  <span class="selected-info" id="selInfo"></span>
+  <div style="flex:1"></div>
+  <button class="action-btn" id="btnSelectAll" title="全选/取消全选当前页">全选</button>
+  <button class="action-btn delete-btn" id="btnDelete" disabled title="永久删除选中书签">删除</button>
+  <button class="action-btn trash-btn" id="btnTrash" title="查看回收站">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    <span class="trash-label">回收站</span>
+  </button>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="cb-cell"><input type="checkbox" id="cbAll"></th>
+        <th class="sortable" data-sort="title">标题<span class="sort-arrow" id="sa_title"></span></th>
+        <th>标签</th>
+        <th class="sortable" data-sort="category">分类<span class="sort-arrow" id="sa_category"></span></th>
+        <th class="sortable" data-sort="status">状态<span class="sort-arrow" id="sa_status"></span></th>
+        <th class="sortable" data-sort="add_date">收藏日期<span class="sort-arrow" id="sa_add_date"></span></th>
+        <th class="sortable" data-sort="processed_at">扫描日期<span class="sort-arrow" id="sa_processed_at"></span></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<div class="pagination">
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="pageInfo"></span>
+    <label style="display:flex;align-items:center;gap:4px">每页
+      <select class="page-size-sel" id="pageSizeSel">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+    </label>
+  </div>
+  <div>
+    <button id="btnPrev">← 上一页</button>
+    <button id="btnNext">下一页 →</button>
+  </div>
+</div>
+<div class="loading" id="loading"><div class="loading-box"><span class="spinner"></span><span id="loadingText">处理中...</span></div></div>
+<div class="toast" id="toast"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
