@@ -1,0 +1,25 @@
+profile: "test user"
+
+tags:
+  domain: ["前端", "后端", "AI", "DevOps", "资源"]
+  tech: ["TypeScript", "React", "Python", "Docker", "Kubernetes"]
+  type: ["教程", "工具", "文档", "博客"]
+  meta: ["收藏", "待读"]
+  status: []
+
+classification_rules:
+  - domain: "前端"
+    match:
+      tag_contains: ["React", "TypeScript"]
+  - domain: "后端"
+    match:
+      url_contains: ["api.example.com", "backend"]
+  - domain: "AI"
+    match:
+      tag_contains: ["AI"]
+  - domain: "DevOps"
+    match:
+      tag_contains: ["Docker", "Kubernetes"]
+  - domain: "资源"
+    match:
+      default: true

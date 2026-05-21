@@ -1,6 +1,6 @@
 # 测试策略
 
-> 覆盖率要求、测试分层、工具链、Mock 策略。
+> 覆盖率要求、场景划分、工具链、Mock 策略。
 
 ## 核心规则（来自 rules.md）
 
@@ -17,14 +17,15 @@
 |------|------|------|
 | Vitest | ^4.1.5 | 测试框架 |
 | better-sqlite3 | ^12.9.0 | 内存数据库 (`:memory:`) |
-| vi.fn() / vi.stubGlobal | 内置 | Mock |
+| vi.fn() / vi.spyOn | 内置 | Mock |
 
 **执行命令**：
 
 ```bash
 npx vitest run                        # 全量
-npx vitest run tests/foo.test.ts      # 单文件
+npx vitest run tests/scenarios/foo.test.ts  # 单文件
 npx vitest                            # watch 模式
+npx vitest run --reporter=verbose     # 详细输出
 npx vitest run --coverage             # 覆盖率报告
 ```
 
@@ -34,43 +35,43 @@ npx vitest run --coverage             # 覆盖率报告
 
 | 指标 | 要求 |
 |------|------|
-| 纯函数模块（classifier, response-parser, chrome-html） | 行覆盖率 >= 90% |
-| 管道模块（scanner, classifier, link-checker） | 行覆盖率 >= 70% |
+| 核心算法模块（classifier, response-parser） | 行覆盖率 >= 90% |
+| 管道 + 数据层（scanner, repository, content-fetcher） | 行覆盖率 >= 70% |
 | 总体 | 行覆盖率 >= 70% |
 
 ---
 
-## 测试分层
+## 场景划分
 
-### T0：纯函数单元测试（无外部依赖）
+按业务场景组织测试，不按函数逐个覆盖。每个测试对应一条验收标准或一个端到端流程。
 
-直接测试，不需要 Mock。
+### 核心算法场景（无 Mock）
 
-| 模块 | 源码 | 测试来源 | 关键用例 |
-|------|------|---------|---------|
-| 分类引擎 | `src/pipeline/classifier.ts` | [classify.md 验收标准](features/classify.md) | 空 rules、tags='[]'、URL/title 匹配、tag 匹配、默认值、subcategory |
-| AI 响应解析 | `src/ai/response-parser.ts` | [scan.md](features/scan.md) | JSON 提取、markdown 包裹、标签过滤、confidence 默认值、value_score 截断 |
-| Chrome HTML 解析 | `src/importer/chrome-html.ts` | [import.md 验收标准](features/import.md) | `<A>` 提取、文件夹路径、无效 URL 过滤、去重逻辑、无 add_date 边界 |
-| 配置加载 | `src/config/loader.ts` | [config.md 验收标准](features/config.md) | YAML 解析、`${VAR}` 展开、缺失必填字段、.env 不覆盖已有变量 |
+| 场景 | 测试文件 | 验收标准来源 | 关键验证 |
+|------|---------|-------------|---------|
+| 分类引擎 | `tests/scenarios/classify.test.ts` | [classify.md](features/classify.md) | 空 rules → 待分类、4 阶段匹配流程、subcategory 生成规则、OR 逻辑 |
+| AI 响应解析 | `tests/scenarios/ai-response.test.ts` | [scan.md](features/scan.md) | 批量 JSON 解析、代码块提取、标签过滤、数据校验（截断/默认值）、异常输入 |
 
-### T1：Mock 依赖的单元测试
+### 端到端流程场景
 
-| 模块 | Mock 对象 | 测试来源 | 关键用例 |
-|------|----------|---------|---------|
-| Scanner 管道 | AIProvider, DB, link-checker | [scan.md 验收标准](features/scan.md) | 死链不调 AI、重定向 URL 更新、`deep_done` 跳过、`--force`、fast/deep 模式 |
-| deep 模式 | AIProvider, DB, content-fetcher | [scan.md 验收标准](features/scan.md) | 无正文跳过、覆盖 scan 字段、description 保留、`--category` 筛选 |
-| Batch 处理 | fetch | scan/deep 管道规则 | 分块 size、并发 semaphore、429 重试、指数退避、chunk 失败不阻塞 |
-| Link checker | fetch | [link-check.md 验收标准](features/link-check.md) | 2xx 存活、404/5xx 死链、403+HTML 存活、403 无 HTML 死链、超时死链 |
-| 提示词构建 | — | [config.md 验收标准](features/config.md) | `{{tags}}` 替换、`{{input_data}}` 替换、deep 正文截断 3000 字符 |
+| 场景 | 测试文件 | 验收标准来源 | 关键验证 |
+|------|---------|-------------|---------|
+| 导入流程 | `tests/scenarios/import.test.ts` | [import.md](features/import.md) | HTML 解析、URL 过滤、标题回退、去重、文件不存在报错 |
+| 正文提取与缓存 | `tests/scenarios/content-extraction.test.ts` | [cache.md](features/cache.md) | HTML → 正文提取、缓存读写、空内容不缓存、key 一致性 |
 
-### T2：集成测试
+### 数据层场景（`:memory:` SQLite）
 
-| 场景 | 测试来源 | 验证点 |
-|------|---------|--------|
-| import → scan → stats | [import.md](features/import.md) + [scan.md](features/scan.md) + [stats.md](features/stats.md) | 端到端流程，10 条样本 HTML |
-| scan → deep → scan | [scan.md](features/scan.md) + [deep.md](features/deep.md) | deep 覆盖 scan，后续 scan 不覆盖 deep_done |
-| 中断恢复 | [error-handling.md](system/error-handling.md) | 部分失败后重跑，验证断点续跑 |
-| 死链标记 | [link-check.md](features/link-check.md) | 404/403 链接标记正确 |
+| 场景 | 测试文件 | 验收标准来源 | 关键验证 |
+|------|---------|-------------|---------|
+| 状态流转与查询 | `tests/scenarios/data-layer.test.ts` | scan/classify/check-links 验收标准 | 幂等插入、scan/deep/link-check/classify 查询语义、COALESCE 保留 description、去重标记、过滤查询 |
+
+### 待补充场景
+
+| 场景 | 依赖 | 验收标准来源 |
+|------|------|-------------|
+| Scan 管道端到端 | Mock AI/HTTP | [scan.md](features/scan.md) 验收标准 1-13 |
+| 死链检测 | Mock fetch | [link-check.md](features/link-check.md) 验收标准 |
+| 中断恢复 | Mock AI/HTTP | [error-handling.md](system/error-handling.md) |
 
 ---
 
@@ -81,7 +82,7 @@ npx vitest run --coverage             # 覆盖率报告
 | AI 调用 | 实现 `AIProvider` 接口的 Mock 对象 | 返回预设 JSON，控制 tags/confidence/description |
 | fetch | `vi.stubGlobal('fetch', vi.fn())` | 模拟 HTTP 响应状态码和内容 |
 | 数据库 | better-sqlite3 `:memory:` | 每个测试独立建表，测试结束丢弃 |
-| 文件系统 | `os.tmpdir()` + 测试后清理 | 用于提示词加载、正文缓存 |
+| 文件系统 | `os.tmpdir()` + 测试后清理 | 用于正文缓存测试 |
 
 ---
 
@@ -89,19 +90,16 @@ npx vitest run --coverage             # 覆盖率报告
 
 ```
 tests/
-├── unit/
-│   ├── classifier.test.ts
-│   ├── response-parser.test.ts
-│   ├── chrome-html.test.ts
-│   └── config-loader.test.ts
-├── integration/
-│   ├── scan-pipeline.test.ts
-│   ├── deep-pipeline.test.ts
-│   └── import-to-stats.test.ts
-└── fixtures/
-    ├── sample-bookmarks.html      # 10-20 条样本书签
-    ├── sample-config.yaml         # 测试用 config
-    └── sample-settings.yaml       # 测试用 settings
+├── scenarios/                        # 按业务场景组织
+│   ├── classify.test.ts              # 分类引擎核心算法
+│   ├── ai-response.test.ts           # AI 响应解析流程
+│   ├── import.test.ts                # 导入流程（解析 + 去重）
+│   ├── content-extraction.test.ts    # 正文提取 + 缓存流程
+│   └── data-layer.test.ts            # 数据层状态流转与查询语义
+└── fixtures/                         # 测试夹具
+    ├── sample-bookmarks.html         # 10 条样本书签
+    ├── sample-config.yaml            # 测试用 config
+    └── sample-settings.yaml          # 测试用 settings
 ```
 
 ---
@@ -111,7 +109,8 @@ tests/
 | 项目 | 状态 |
 |------|------|
 | 测试框架 | ✅ Vitest ^4.1.5 已安装 |
-| 测试文件 | ❌ 无 |
-| Fixtures | ❌ `tests/fixtures/` 为空 |
-| 覆盖率配置 | ❌ 未启用 |
+| 测试配置 | ✅ `vitest.config.ts` 已配置覆盖率和 glob |
+| 场景测试 | ✅ 5 个场景文件，31 条测试 |
+| Fixtures | ✅ `tests/fixtures/` 已创建 |
+| 管道集成测试 | ❌ 待补充（需 Mock AI/HTTP） |
 | CI 集成 | ❌ 无 |

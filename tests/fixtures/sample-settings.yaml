@@ -1,0 +1,17 @@
+ai:
+  provider: openai
+  openai:
+    api_key: "test-key"
+    model: "gpt-4"
+  batch:
+    size: 10
+    concurrency: 3
+    retry: 2
+
+storage:
+  db: "data/test.db"
+  cache: "data/cache"
+
+thresholds:
+  low_confidence: 0.5
+  dead_link_timeout: 10
