@@ -10,11 +10,9 @@ import { logger } from '../utils/logger.js';
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '未扫描',
-  scan_done: '快速扫描',
-  deep_done: '深度扫描',
+  tagged: '已扫描',
   error: '失败',
   dead: '无法访问',
-  empty: '内容为空',
 };
 
 function parseUrl(req: IncomingMessage): { path: string; params: URLSearchParams } {

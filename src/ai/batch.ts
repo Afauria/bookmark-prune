@@ -1,5 +1,5 @@
 import type { AIProvider } from './provider.js';
-import type { AIOutput, Bookmark, BatchConfig, BatchResult } from '../types.js';
+import type { AIOutput, Bookmark, BatchConfig, ProcessBatchResult } from '../types.js';
 import { parseAIResponse } from './response-parser.js';
 import { RetryableError } from './anthropic.js';
 import { logger } from '../utils/logger.js';
@@ -12,7 +12,7 @@ export async function processBatch(
   allowedTags: string[],
   batchConfig: BatchConfig,
   mode: 'fast' | 'deep',
-): Promise<{ results: Map<string, AIOutput>; batchResult: BatchResult }> {
+): Promise<{ results: Map<string, AIOutput>; batchResult: ProcessBatchResult }> {
   logger.info(`[PROMPT]\n${prompt}\n[/PROMPT]`);
   const results = new Map<string, AIOutput>();
   const progress = new ProgressReporter(bookmarks.length);

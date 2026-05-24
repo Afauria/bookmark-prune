@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CREATE_TABLE_SQL, CREATE_INDEXES_SQL } from '../../src/db/schema.js';
 import {
   insertBookmarks,
-  getBookmarksForScan,
-  getBookmarksForDeep,
+  getBookmarks,
   getBookmarksForLinkCheck,
   getBookmarksForClassify,
   updateBookmark,
@@ -40,14 +39,15 @@ function insert(db: ReturnType<typeof createDb>, overrides: Record<string, unkno
     original_folder: '',
     add_date: (overrides.add_date as number) ?? 1000000,
   }]);
-  // Apply status/category/tags overrides via update
-  if (overrides.status) updateBookmark(db, id, { status: overrides.status as 'scan_done' });
+  // Apply status/category/tags/scanMode overrides via update
+  if (overrides.status) updateBookmark(db, id, { status: overrides.status as 'pending' | 'tagged' | 'error' | 'dead' });
   if (overrides.category !== undefined) updateBookmark(db, id, { category: overrides.category as string | null });
   if (overrides.tags) updateBookmark(db, id, { tags: overrides.tags as string });
+  if (overrides.scanMode) updateBookmark(db, id, { scanMode: overrides.scanMode as 'fast' | 'deep' });
   return id;
 }
 
-// scan.md / classify.md / check-links.md 验收标准 — 数据层语义
+// scan.md 验收标准 — 数据层语义
 describe.skipIf(!nativeAvailable)('数据层状态流转与查询语义', () => {
   let db: ReturnType<typeof createDb>;
   beforeEach(() => { db = createDb(); });
@@ -63,21 +63,32 @@ describe.skipIf(!nativeAvailable)('数据层状态流转与查询语义', () => 
     ])).toBe(0);
   });
 
-  // scan.md 验收标准: 各模式的查询语义
-  it('scan 查询: pending(默认), force(非 deep_done)', () => {
+  // scan.md 验收标准: 查询语义
+  it('getBookmarks: 按状态筛选', () => {
     insert(db, { status: 'pending' });
-    insert(db, { status: 'scan_done' });
-    insert(db, { status: 'deep_done' });
-    expect(getBookmarksForScan(db)).toHaveLength(1);
-    expect(getBookmarksForScan(db, { force: true })).toHaveLength(2);
+    insert(db, { status: 'tagged' });
+    insert(db, { status: 'error' });
+    const pending = getBookmarks(db, { status: ['pending'] });
+    const pendingTagged = getBookmarks(db, { status: ['pending', 'tagged'] });
+    expect(pending).toHaveLength(1);
+    expect(pendingTagged).toHaveLength(2);
   });
 
-  // scan.md 验收标准: deep 不覆盖 deep_done
-  it('deep 查询: 非 deep_done(默认), force(全部)', () => {
-    insert(db, { status: 'deep_done' });
+  it('getBookmarks: 按 scanMode 筛选', () => {
+    insert(db, { status: 'tagged', scanMode: 'fast' });
+    insert(db, { status: 'tagged', scanMode: 'deep' });
+    const fast = getBookmarks(db, { scanMode: 'fast' });
+    const deep = getBookmarks(db, { scanMode: 'deep' });
+    expect(fast).toHaveLength(1);
+    expect(deep).toHaveLength(1);
+  });
+
+  it('getBookmarks: 组合筛选（status + scanMode）', () => {
+    insert(db, { status: 'tagged', scanMode: 'fast' });
+    insert(db, { status: 'tagged', scanMode: 'deep' });
     insert(db, { status: 'pending' });
-    expect(getBookmarksForDeep(db)).toHaveLength(1); // deep_done 被排除
-    expect(getBookmarksForDeep(db, { force: true })).toHaveLength(2);
+    const taggedFast = getBookmarks(db, { status: ['tagged'], scanMode: 'fast' });
+    expect(taggedFast).toHaveLength(1);
   });
 
   // check-links.md: dead 始终跳过
@@ -97,25 +108,24 @@ describe.skipIf(!nativeAvailable)('数据层状态流转与查询语义', () => 
     expect(getBookmarksForClassify(db, { force: true })).toHaveLength(2);
   });
 
-  // scan.md: deep 覆盖 fast 时 COALESCE 保留 description
-  it('updateBookmarkResult: deep 覆盖 fast，COALESCE 保留 description', () => {
+  // scan.md: deep 覆盖 fast 时 COALESCE 保留 summary
+  it('updateBookmarkResult: deep 覆盖 fast，COALESCE 保留 summary', () => {
     const id = insert(db);
     // fast 扫描
     updateBookmarkResult(db, id, {
       tags: '["React"]', confidence: 0.8, category: '前端', value_score: 7,
-      ai_model: 'gpt-4', status: 'scan_done', description: 'fast desc',
+      ai_model: 'gpt-4', status: 'tagged', scanMode: 'fast', summary: 'fast summary',
     });
-    // deep 扫描覆盖，description 传 null → COALESCE 保留 fast 的值
+    // deep 扫描覆盖，summary 传 null → COALESCE 保留 fast 的值
     updateBookmarkResult(db, id, {
       tags: '["React","Hook"]', confidence: 0.95, category: '前端', subcategory: 'React',
-      value_score: 9, ai_model: 'gpt-4', status: 'deep_done', description: null,
-      summary: 'deep summary',
+      value_score: 9, ai_model: 'gpt-4', status: 'tagged', scanMode: 'deep', summary: null,
     });
     const stats = getStats(db);
-    const bm = getBookmarksFiltered(db, { status: 'deep_done' }).data[0];
+    const bm = getBookmarksFiltered(db, { status: 'tagged' }).data[0];
     expect(bm.tags).toBe('["React","Hook"]');
-    expect(bm.description).toBe('fast desc'); // COALESCE 保留
-    expect(bm.summary).toBe('deep summary');
+    expect(bm.summary).toBe('fast summary'); // COALESCE 保留
+    expect(bm.scan_mode).toBe('deep');
   });
 
   // dedup.md: markDuplicates

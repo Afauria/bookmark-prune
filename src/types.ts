@@ -1,4 +1,6 @@
-export type BookmarkStatus = 'pending' | 'scan_done' | 'deep_done' | 'error' | 'dead' | 'empty';
+export type BookmarkStatus = 'pending' | 'tagged' | 'error' | 'dead';
+
+export type ScanMode = 'fast' | 'deep';
 
 export interface Bookmark {
   id: string;
@@ -19,6 +21,7 @@ export interface Bookmark {
   notes: string | null;
   value_score: number | null;
   ai_model: string | null;
+  scan_mode: ScanMode | null;
   processed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -28,7 +31,6 @@ export interface AIOutput {
   url?: string; // for batch matching
   tags: string[];
   confidence: number;
-  description?: string;
   summary?: string;
   value_score: number;
 }
@@ -105,11 +107,23 @@ export interface FetchedContent {
   error?: string;
 }
 
+export interface SkippedDetail {
+  id: string;
+  url: string;
+  reason: 'no_content' | 'dead' | 'error';
+}
+
+export interface ProcessBatchResult {
+  success: number;
+  failed: number;
+  skipped: number;
+  failedIds?: string[];
+}
+
 export interface BatchResult {
   success: number;
   failed: number;
   skipped: number;
-  dead?: number;
-  empty?: number;
-  failedIds?: string[];
+  dead: number;
+  skippedDetails: SkippedDetail[];
 }

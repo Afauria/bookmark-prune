@@ -1,6 +1,6 @@
 # Feature Spec: scan — AI 打标签
 
-> 两种模式：fast（标题+URL）和 deep（标题+URL+正文）。分批交替处理：每批检测链接 → AI 打标签。
+> 两种模式：fast（标题+URL）和 deep（标题+URL+正文）。用户通过参数筛选书签，默认只处理 pending，--force 处理全部。
 
 ## 状态：已完成
 
@@ -9,7 +9,6 @@
 - 读写 `bookmarks` 表 → [models/bookmark.md](../models/bookmark.md)
 - 依赖 [features/classify.md](classify.md)（自动分类）
 - 依赖 [features/link-check.md](link-check.md)（死链检测，三态结果）
-- 依赖 [features/link-check.md](link-check.md)（内容缓存，磁盘复用）
 - 依赖 [features/cache.md](cache.md)（正文磁盘缓存管理）
 
 ---
@@ -24,28 +23,54 @@ bm scan --deep [options]    # deep 模式
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--deep` | boolean | false | deep 模式：抓取正文 + AI 深度分析 |
+| `--status <status>` | string | — | 按状态筛选（pending/tagged/dead/error） |
+| `--scan-mode <mode>` | string | — | 按 scan_mode 筛选（fast/deep） |
 | `-l, --limit <n>` | number | 无限制 | 本次处理的最大书签数 |
 | `-s, --start <n>` | number | 0 | 跳过前 N 条（OFFSET） |
-| `--force` | boolean | false | 重新处理已完成的书签 |
-| `--category <cat>` | string | — | 按分类筛选（仅 deep 模式） |
-| `--url <url>` | string | — | 指定单个 URL 处理（隐含 force=true） |
+| `--force` | boolean | false | 处理筛选集合中全部书签（跳过 dead） |
+| `--category <cat>` | string | — | 按分类筛选 |
+| `--url <url>` | string | — | 指定单个 URL 处理 |
 
-### Fast 模式查询逻辑
+### 筛选逻辑
 
-| 参数组合 | SQL WHERE 条件 |
-|---------|---------------|
-| 默认 | `status = 'pending'` |
-| `--force` | `status != 'deep_done'` |
-| `--url URL` | `status != 'deep_done'` + JS 端过滤 |
+**第一步：用户参数筛选出集合 S**
 
-### Deep 模式查询逻辑
+```sql
+-- 基础查询
+SELECT * FROM bookmarks
+WHERE 1=1
+  [AND status IN ('pending', 'tagged')]  -- 如果指定 --status
+  [AND scan_mode = 'fast']               -- 如果指定 --scan-mode
+  [AND category = ?]                     -- 如果指定 --category
+  [AND url = ?]                          -- 如果指定 --url
+LIMIT ? OFFSET ?
+```
 
-| 参数组合 | SQL WHERE 条件 |
-|---------|---------------|
-| 默认 | `status != 'deep_done'` |
-| `--force` | `1=1`（所有书签） |
-| `--category AI` | 追加 `AND category = 'AI'` |
-| `--url URL` | `1=1` + JS 端过滤 |
+**第二步：从集合 S 中挑要处理的书签**
+
+| 命令 | 处理范围 |
+|------|---------|
+| 无 `--force` | S 中 `status = 'pending'` 的 |
+| 有 `--force` | S 中 `status != 'dead'` 的（即 pending + tagged + error）|
+
+### 示例
+
+```bash
+# 默认：只处理 pending
+bm scan
+
+# 处理 pending 和 tagged 的（全部）
+bm scan --force
+
+# 处理 tagged 中 scan_mode=fast 的（升级为 deep）
+bm scan --deep --status tagged --scan-mode fast
+
+# 处理 AI 分类下的 pending
+bm scan --category AI
+
+# --force 处理 AI 分类下的全部（跳过 dead）
+bm scan --deep --category AI --force
+```
 
 ---
 
@@ -64,61 +89,41 @@ bm scan --deep [options]    # deep 模式
 穿插: [csdn-1, github-1, toutiao-1, csdn-2, csdn-3, csdn-4]
 ```
 
-### Fast 模式（每批）
+### 逐条书签处理流程
 
 ```
 缓存查找（每条书签）
-│  DB content 非空 → pageData[id]，跳过请求
-│  磁盘缓存 {id}.json → pageData[id]，跳过请求
+│  DB content 非空 → pageData[id]，跳过 HTTP
+│  磁盘缓存 {id}.json → pageData[id]，跳过 HTTP
 │  无缓存 → 进入链接检测
     │
     ▼
 checkLinks(非缓存 URLs)
-│  alive → extractContent(html) → pageData[id] → cacheToDisk → 继续
-│  dead → status='dead'，结束
-│  error → status='error'，结束（可重试）
+│  alive (200) → extractContent(html) → pageData[id] → cacheToDisk → 继续
+│  dead (404/软404) → status='dead'，结束
+│  error (521/403/超时) → status='error'，结束（可重试）
     │
     ▼
-AI 打标签 (buildScanPrompt, 不含正文)
+Deep 模式额外检查
+│  content 非空 → 继续
+│  content 为空 → 跳过，状态不变（下次可能正文可用）
+    │
+    ▼
+AI 打标签
+│  fast: buildScanPrompt，批量提交，返回 JSON 数组
+│  deep: buildDeepPrompt，逐篇提交，返回单个 JSON 对象
 │  失败 → status='error'
-│  成功 → tags[] + description + confidence + value_score
+│  成功 → tags[] + summary(deep 仅有) + confidence + value_score
     │
     ▼
-自动分类 (classify)
-    │
-    ▼
-写入 DB (status=scan_done)
-```
-
-### Deep 模式（每批）
-
-```
-缓存查找（每条书签）
-│  DB content 非空 → pageData[id]，跳过请求
-│  磁盘缓存 {id}.json → pageData[id]，跳过请求
-│  无缓存 → 进入链接检测
-    │
-    ▼
-checkLinks(非缓存 URLs)
-│  alive → extractContent(html) → pageData[id] → cacheToDisk → 继续
-│  dead → status='dead'，结束
-│  error → status='error'，结束
-    │
-    ▼
-正文检查
-│  pageData[id].content 非空 → 继续
-│  无正文 → status='empty'，结束
-    │
-    ▼
-AI 打标签 (buildDeepPrompt, 含正文)
-│  失败 → status='error'
-│  成功 → tags[] + summary + confidence + value_score
-    │
-    ▼
-自动分类 (classify)
-    │
-    ▼
-写入 DB (status=deep_done)
+自动分类（classify，规则引擎）
+│
+▼
+写入 DB
+├─ status='tagged'
+├─ scan_mode='fast'/'deep'
+├─ summary（仅 deep，COALESCE 保留旧值）
+└─ 其他字段（tags, category, confidence, value_score）
 ```
 
 ---
@@ -129,9 +134,25 @@ AI 打标签 (buildDeepPrompt, 含正文)
 
 | 项目 | 说明 |
 |------|------|
-| 入参 | `{ config, settings, db, mode: 'fast' \| 'deep', limit?, offset?, force?, category?, url?, ids? }` |
-| 出参 | `Promise<BatchResult>` — `{ success, failed, skipped, dead?, empty? }` |
+| 入参 | `{ config, settings, db, mode: 'fast' \| 'deep', limit?, offset?, force?, category?, url?, status?, scanMode? }` |
+| 出参 | `Promise<BatchResult>` — `{ success, failed, skipped, dead, skippedDetails }` |
 | 批大小 | 10 条/批（`SCAN_BATCH_SIZE`） |
+
+### BatchResult
+
+```typescript
+{
+  success: number;           // 成功处理的书签数
+  failed: number;            // 失败的书签数（链接 error + AI 失败）
+  skipped: number;           // 跳过的书签数（deep 无正文）
+  dead: number;              // 死链书签数
+  skippedDetails: Array<{    // 跳过详情
+    id: string;
+    url: string;
+    reason: string;          // 'no_content' | 'dead' | 'error'
+  }>;
+}
+```
 
 ---
 
@@ -141,22 +162,22 @@ AI 打标签 (buildDeepPrompt, 含正文)
 
 1. **AI 只打标签，不做分类**：分类由规则引擎决定，提示词不要求 AI 输出 category
 2. **标签严格限定**：AI 必须从允许列表中选标签，不允许自创（`response-parser.ts` 过滤非法标签）
-3. **批量处理**：单次提示词包含多条书签，AI 返回 JSON 数组
+3. **批量策略按模式区分**：
+   - fast：单次提示词包含多条书签，AI 返回 JSON 数组（批大小由 `settings.ai.batch.size` 控制）
+   - deep：逐篇提交，每次只含一条书签，AI 返回单个 JSON 对象。正文较长，多篇拼合易导致 AI 解析错误或截断
 
 ### AI 输出格式
 
 fast 模式：
 ```json
 [
-  {"url": "https://...", "tags": ["Kotlin", "MVVM"], "confidence": 0.9, "description": "1-2句话描述", "value_score": 7}
+  {"url": "https://...", "tags": ["Kotlin", "MVVM"], "confidence": 0.9, "value_score": 7}
 ]
 ```
 
-Deep 模式：
+Deep 模式（逐篇，返回单个对象）：
 ```json
-[
-  {"url": "https://...", "tags": ["Kotlin", "MVVM", "Jetpack"], "confidence": 0.95, "summary": "2-5句话摘要", "value_score": 8}
-]
+{"url": "https://...", "tags": ["Kotlin", "MVVM", "Jetpack"], "confidence": 0.95, "summary": "2-5句话摘要", "value_score": 8}
 ```
 
 ### fast 与 deep 对比
@@ -164,7 +185,8 @@ Deep 模式：
 | 项目 | fast | deep |
 |------|------|------|
 | AI 输入 | URL + 标题 | URL + 标题 + 正文（截断 3000 字） |
-| AI 输出 | description（1-2 句） | summary（2-5 句） |
+| AI 输出 | tags + category + confidence + value_score | 同上 + summary |
+| 批量策略 | 多条拼合，AI 返回 JSON 数组 | 逐篇提交，AI 返回单个 JSON 对象 |
 | 标签精度 | 基础 | 精细（更多标签） |
 | 缓存行为 | 缓存正文到磁盘（AI 不感知） | 优先从磁盘缓存读取 |
 
@@ -188,32 +210,15 @@ Deep 模式：
 
 详见 [features/cache.md](cache.md)。快速扫描时缓存正文（AI 不感知），深度扫描时优先命中缓存。error 不缓存以便重试。
 
-### 覆盖规则（deep 覆盖 fast）
+### Deep 模式无正文处理
 
-| 字段 | deep 行为 |
-|------|----------|
-| tags | 覆盖 fast 结果 |
-| confidence | 覆盖 |
-| category | 覆盖（通过自动分类） |
-| subcategory | 覆盖 |
-| value_score | 覆盖 |
-| ai_model | 覆盖 |
-| status | 设为 `deep_done` |
-| summary | 写入（fast 无此字段） |
-| description | 保留 fast 结果（COALESCE） |
-| content | 抓取成功时写入 |
+- deep 模式发现无正文 → 跳过，状态不变，计入 `skipped` 和 `skippedDetails`
+- 不标记 `empty` 状态，下次可能正文可用
 
----
+### COALESCE 行为
 
-## 计数逻辑
-
-| 计数 | 定义 |
-|------|------|
-| success | AI 成功处理的书签数 |
-| failed | AI 失败 + 链接检测 error 数 |
-| dead | 死链书签数 |
-| empty | 正文为空书签数（deep 模式） |
-| skipped | batch 内 skipped |
+- `summary`：使用 COALESCE，若新值为 null 则保留旧值
+- 其他字段：直接覆盖
 
 ---
 
@@ -227,22 +232,31 @@ Deep 模式：
 [INFO] Dead link: https://example.com/gone
 [INFO] [link-check] 404 ✗ dead https://example.com/old
 [INFO] [AI] https://example.com/article → tags: ["typescript"], confidence: 0.9
+[INFO] [CLASSIFY] https://example.com/article → AI/Language
+[INFO] Skipped (no content): https://example.com/empty-page
+[INFO] Scan complete: success=35, failed=5, skipped=3, dead=5
+[INFO] ┌─ Skipped details ───────────────────────────────┐
+[INFO] │ https://example.com/empty-page → no content     │
+[INFO] │ https://example.com/another-empty → no content  │
+[INFO] │ https://example.com/third-empty → no content    │
+[INFO] └─────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 验收标准
 
-1. `bm scan` 默认 fast 模式，处理 `status='pending'` 的书签
-2. `bm scan --deep` 处理 `status != 'deep_done'` 的书签
-3. `--force` 时处理所有非 `deep_done` 的书签
-4. 死链（404/软404）标记 `status='dead'`
-5. 瞬时错误（521/超时）标记 `status='error'`，不缓存
-6. Deep 正文为空标记 `status='empty'`
-7. AI 失败标记 `status='error'`
-8. `deep_done` 终态不被覆盖
+1. `bm scan` 默认 fast 模式，只处理 `status='pending'` 的书签
+2. `bm scan --force` 处理筛选集合中全部非 dead 书签（pending + tagged + error）
+3. `--status` 参数按状态筛选书签
+4. `--scan-mode` 参数按 scan_mode 筛选书签
+5. 死链（404/软404）标记 `status='dead'`，计入 `dead` 计数
+6. 瞬时错误（521/超时）标记 `status='error'`，不缓存
+7. Deep 正文为空跳过，状态不变，计入 `skipped` 和 `skippedDetails`
+8. AI 失败标记 `status='error'`，计入 `failed` 计数
 9. 进程中断时已处理批次不受影响
-10. `--url` 指定单个 URL，自动 force
+10. `--url` 指定单个 URL 处理
 11. 兼容：`bm deep` 等同于 `bm scan --deep`
 12. 快速扫描 AI prompt 不含正文内容
 13. 链接检测时缓存的正文可供深度扫描复用
+14. 扫描完成输出状态统计 + 跳过详情列表

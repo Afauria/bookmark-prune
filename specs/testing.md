@@ -69,7 +69,6 @@ npx vitest run --coverage             # 覆盖率报告
 
 | 场景 | 依赖 | 验收标准来源 |
 |------|------|-------------|
-| Scan 管道端到端 | Mock AI/HTTP | [scan.md](features/scan.md) 验收标准 1-13 |
 | 死链检测 | Mock fetch | [link-check.md](features/link-check.md) 验收标准 |
 | 中断恢复 | Mock AI/HTTP | [error-handling.md](system/error-handling.md) |
 
@@ -95,7 +94,9 @@ tests/
 │   ├── ai-response.test.ts           # AI 响应解析流程
 │   ├── import.test.ts                # 导入流程（解析 + 去重）
 │   ├── content-extraction.test.ts    # 正文提取 + 缓存流程
-│   └── data-layer.test.ts            # 数据层状态流转与查询语义
+│   ├── data-layer.test.ts            # 数据层状态流转与查询语义
+│   └── e2e/
+│       └── scan-flow.test.ts         # Scan 管道端到端测试
 └── fixtures/                         # 测试夹具
     ├── sample-bookmarks.html         # 10 条样本书签
     ├── sample-config.yaml            # 测试用 config
@@ -110,7 +111,7 @@ tests/
 |------|------|
 | 测试框架 | ✅ Vitest ^4.1.5 已安装 |
 | 测试配置 | ✅ `vitest.config.ts` 已配置覆盖率和 glob |
-| 场景测试 | ✅ 5 个场景文件，31 条测试 |
+| 场景测试 | ✅ 6 个场景文件，42 条测试 |
 | Fixtures | ✅ `tests/fixtures/` 已创建 |
-| 管道集成测试 | ❌ 待补充（需 Mock AI/HTTP） |
+| 端到端测试 | ✅ Scan 管道集成测试 |
 | CI 集成 | ❌ 无 |

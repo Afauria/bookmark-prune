@@ -82,6 +82,11 @@ export function loadSettings(settingsPath?: string): Settings {
     throw new Error('Invalid settings: missing ai.provider');
   }
 
+  // Resolve database path relative to settings.yaml directory
+  if (settings.storage?.db && !path.isAbsolute(settings.storage.db)) {
+    settings.storage.db = path.resolve(path.dirname(resolvedPath), settings.storage.db);
+  }
+
   return settings;
 }
 

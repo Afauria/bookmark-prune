@@ -15,17 +15,17 @@
 
 ## 核心需求
 
-1. **批量整理**：导入 Chrome 书签 → AI 打标签 → 规则引擎自动分类 → 6 状态管理 → SQLite 存储
+1. **批量整理**：导入 Chrome 书签 → AI 打标签 → 规则引擎自动分类 → 4 状态管理 → SQLite 存储
 2. **知识沉淀**：对选定书签抓取正文 → AI 深度分析 → 生成摘要 → 覆盖扫描结果
 3. **书签维护**：死链检测、正文为空检测、重定向追溯、回收站管理
 
 ### 双模式处理
 
-**快速扫描（fast）**：标题 + URL → AI 标签 + 规则分类 + 置信度 + 描述
+**快速扫描**：标题 + URL → AI 标签 + 规则分类 + 置信度
 
-**深度解析（deep）**：标题 + URL + 全文 → AI 精细标签 + 摘要 + 价值评分
+**深度解析**：标题 + URL + 全文 → AI 精细标签 + 摘要 + 价值评分（逐篇提交）
 
-**覆盖规则**：deep 可覆盖 fast，`deep_done` 状态不被 fast 覆盖。deep 抓不到正文时跳过，不降级到 fast。
+**覆盖规则**：deep 可覆盖 fast 结果，通过 `scan_mode` 字段区分。deep 抓不到正文时跳过，不降级到 fast。
 
 ### AI 集成
 
@@ -33,7 +33,7 @@
 
 | 模式 | 输入 | AI 输出 |
 |------|------|---------|
-| fast | 标题 + URL | tags + description + confidence + value_score |
+| fast | 标题 + URL | tags + confidence + value_score |
 | deep | 标题 + URL + 全文 | tags(精细) + summary + confidence + value_score |
 
 ### 分类引擎

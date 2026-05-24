@@ -1,12 +1,12 @@
 import type BetterSqlite3 from 'better-sqlite3';
 type Database = BetterSqlite3.Database;
 import { v4 as uuid } from 'uuid';
-import type { Bookmark, BookmarkStatus } from '../types.js';
+import type { Bookmark, BookmarkStatus, ScanMode, SkippedDetail } from '../types.js';
 
 function now(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export function insertBookmarks(db: Database, bookmarks: Array<{
@@ -54,23 +54,51 @@ export function getBookmarksByStatus(
   return db.prepare(sql).all(...params) as Bookmark[];
 }
 
-export function getBookmarksForScan(db: Database, options?: { force?: boolean; limit?: number; offset?: number }): Bookmark[] {
-  let sql: string;
+export function getBookmarks(
+  db: Database,
+  options?: {
+    status?: BookmarkStatus[];
+    scanMode?: ScanMode;
+    category?: string;
+    url?: string;
+    limit?: number;
+    offset?: number;
+  },
+): Bookmark[] {
+  const conditions: string[] = [];
   const params: unknown[] = [];
 
-  if (options?.force) {
-    sql = "SELECT * FROM bookmarks WHERE status != 'deep_done'";
-  } else {
-    sql = "SELECT * FROM bookmarks WHERE status = 'pending'";
+  if (options?.status && options.status.length > 0) {
+    const placeholders = options.status.map(() => '?').join(',');
+    conditions.push(`status IN (${placeholders})`);
+    params.push(...options.status);
   }
 
+  if (options?.scanMode) {
+    conditions.push('scan_mode = ?');
+    params.push(options.scanMode);
+  }
+
+  if (options?.category) {
+    conditions.push('category = ?');
+    params.push(options.category);
+  }
+
+  if (options?.url) {
+    conditions.push('url = ?');
+    params.push(options.url);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  let sql = `SELECT * FROM bookmarks ${where}`;
   if (options?.limit) {
     sql += ' LIMIT ?';
     params.push(options.limit);
   }
   if (options?.offset) {
     if (!options?.limit) {
-      sql += ' LIMIT -1'; // SQLite needs LIMIT before OFFSET
+      sql += ' LIMIT -1';
     }
     sql += ' OFFSET ?';
     params.push(options.offset);
@@ -104,35 +132,6 @@ export function getBookmarksForLinkCheck(db: Database, options?: { force?: boole
   return db.prepare(sql).all(...params) as Bookmark[];
 }
 
-export function getBookmarksForDeep(db: Database, options?: { force?: boolean; limit?: number; offset?: number; category?: string }): Bookmark[] {
-  let sql: string;
-  const params: unknown[] = [];
-
-  if (options?.force) {
-    sql = 'SELECT * FROM bookmarks WHERE 1=1';
-  } else {
-    sql = "SELECT * FROM bookmarks WHERE status != 'deep_done'";
-  }
-
-  if (options?.category) {
-    sql += ' AND category = ?';
-    params.push(options.category);
-  }
-  if (options?.limit) {
-    sql += ' LIMIT ?';
-    params.push(options.limit);
-  }
-  if (options?.offset) {
-    if (!options?.limit) {
-      sql += ' LIMIT -1';
-    }
-    sql += ' OFFSET ?';
-    params.push(options.offset);
-  }
-
-  return db.prepare(sql).all(...params) as Bookmark[];
-}
-
 export function getBookmarksForClassify(db: Database, options?: { force?: boolean }): Bookmark[] {
   const sql = options?.force
     ? 'SELECT * FROM bookmarks'
@@ -148,8 +147,13 @@ export function updateBookmark(
   const entries = Object.entries(fields).filter(([k]) => k !== 'id');
   if (entries.length === 0) return;
 
+  // Convert camelCase to snake_case for database columns
+  const toSnakeCase = (key: string): string => {
+    return key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+  };
+
   entries.push(['updated_at', now()]);
-  const setClause = entries.map(([k]) => `${k} = ?`).join(', ');
+  const setClause = entries.map(([k]) => `${toSnakeCase(k)} = ?`).join(', ');
   const values = entries.map(([, v]) => v);
 
   db.prepare(`UPDATE bookmarks SET ${setClause} WHERE id = ?`)
@@ -167,7 +171,7 @@ export function updateBookmarkResult(
     value_score: number;
     ai_model: string;
     status: BookmarkStatus;
-    description?: string;
+    scanMode: ScanMode;
     summary?: string;
   },
 ): void {
@@ -175,13 +179,13 @@ export function updateBookmarkResult(
   db.prepare(`
     UPDATE bookmarks SET
       tags = ?, confidence = ?, category = ?, subcategory = ?, value_score = ?,
-      ai_model = ?, status = ?, description = COALESCE(?, description),
-      summary = COALESCE(?, summary), processed_at = ?, updated_at = ?
+      ai_model = ?, status = ?, scan_mode = ?, summary = COALESCE(?, summary),
+      processed_at = ?, updated_at = ?
     WHERE id = ?
   `).run(
     data.tags, data.confidence, data.category, data.subcategory ?? null, data.value_score,
-    data.ai_model, data.status, data.description ?? null,
-    data.summary ?? null, processedAt, processedAt, id,
+    data.ai_model, data.status, data.scanMode, data.summary ?? null,
+    processedAt, processedAt, id,
   );
 }
 
@@ -209,6 +213,7 @@ export function getStats(db: Database): {
   total: number;
   byStatus: Record<string, number>;
   byCategory: Record<string, number>;
+  byScanMode: Record<string, number>;
 } {
   const total = (db.prepare('SELECT COUNT(*) as count FROM bookmarks').get() as { count: number }).count;
 
@@ -226,7 +231,14 @@ export function getStats(db: Database): {
     byCategory[row.category ?? 'null'] = row.count;
   }
 
-  return { total, byStatus, byCategory };
+  const scanModeRows = db.prepare('SELECT scan_mode, COUNT(*) as count FROM bookmarks GROUP BY scan_mode')
+    .all() as { scan_mode: string | null; count: number }[];
+  const byScanMode: Record<string, number> = {};
+  for (const row of scanModeRows) {
+    byScanMode[row.scan_mode ?? 'null'] = row.count;
+  }
+
+  return { total, byStatus, byCategory, byScanMode };
 }
 
 export function getPendingCount(db: Database): number {
@@ -282,12 +294,9 @@ export function getBookmarksFiltered(db: Database, options?: {
   const allowedSort = new Set(['updated_at', 'title', 'category', 'status', 'add_date', 'processed_at', 'created_at']);
   const sortCol = allowedSort.has(options?.sort ?? '') ? options!.sort : 'updated_at';
   const sortDir = options?.dir === 'ASC' ? 'ASC' : 'DESC';
-  // add_date is stored as INTEGER, processed_at as TEXT
   const orderBy = sortCol === 'processed_at'
     ? `ORDER BY COALESCE(processed_at, '') ${sortDir} NULLS LAST`
-    : sortCol === 'add_date'
-      ? `ORDER BY COALESCE(add_date, 0) ${sortDir}`
-      : `ORDER BY ${sortCol} ${sortDir}`;
+    : `ORDER BY ${sortCol} ${sortDir}`;
 
   const offset = (page - 1) * pageSize;
   const data = db.prepare(

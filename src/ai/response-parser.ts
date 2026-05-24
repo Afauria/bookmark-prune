@@ -87,7 +87,6 @@ function validateAIOutput(
     url: typeof obj.url === 'string' ? obj.url : undefined,
     tags,
     confidence,
-    description: typeof obj.description === 'string' ? obj.description : undefined,
     summary: typeof obj.summary === 'string' ? obj.summary : undefined,
     value_score: valueScore,
   };

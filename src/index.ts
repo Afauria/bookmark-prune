@@ -152,7 +152,7 @@ program
 
 program
   .command('stats')
-  .description('查看数据库统计（按状态、分类）')
+  .description('查看数据库统计（按状态、分类、scan_mode）')
   .action(() => {
     try {
       const settings = loadSettings();
@@ -166,11 +166,16 @@ program
         console.log(`  ${status}: ${count}`);
       }
 
+      console.log('\nBy scan_mode:');
+      for (const [scanMode, count] of Object.entries(stats.byScanMode)) {
+        console.log(`  ${scanMode}: ${count}`);
+      }
+
       console.log('\nBy category:');
       const sorted = Object.entries(stats.byCategory)
         .sort(([, a], [, b]) => b - a);
       for (const [cat, count] of sorted) {
-        const pct = ((count / stats.total) * 100).toFixed(1);
+        const pct = stats.total > 0 ? ((count / stats.total) * 100).toFixed(1) : '0.0';
         console.log(`  ${cat}: ${count} (${pct}%)`);
       }
 

@@ -7,13 +7,12 @@ const tags = ['TypeScript', 'React', 'Python', 'Docker'];
 describe('AI 响应解析流程', () => {
   it('标准批量 JSON → 正确解析多条结果', () => {
     const raw = JSON.stringify([
-      { url: 'https://a.com', tags: ['TypeScript', 'React'], confidence: 0.9, description: 'desc', value_score: 8 },
+      { url: 'https://a.com', tags: ['TypeScript', 'React'], confidence: 0.9, value_score: 8 },
       { url: 'https://b.com', tags: ['Python'], confidence: 0.7, value_score: 6 },
     ]);
     const result = parseAIResponse(raw, tags)!;
     expect(result).toHaveLength(2);
     expect(result[0].tags).toEqual(['TypeScript', 'React']);
-    expect(result[0].description).toBe('desc');
     expect(result[1].tags).toEqual(['Python']);
   });
 
